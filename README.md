@@ -6,6 +6,9 @@ The public demo code currently covers raw ADC loading, interference mitigation, 
 
 > This repository is under active development, so the documentation may not always fully reflect the current code status.
 
+## Schematic overview 
+![DDMA FMCW radar processing chain](/images/gitProjectStructure_h.png)
+
 
 ## Signal Chain
 
