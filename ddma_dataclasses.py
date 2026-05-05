@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Optional, List, Dict
 from dataclasses import dataclass, field
 
 #======================================================================================
@@ -16,6 +17,8 @@ class CaptureSettings:
 
     range_resolution: float
     vel_resolution: float
+
+    frame_period: float
 
     def num_total_chirps(self) -> int:
         return self.num_chirp_loops * self.num_chirps_per_loop
@@ -38,11 +41,11 @@ class ProcessingSettings:
                                         )
 
     rdm_cfg: dict = field(default_factory=lambda:
-                    {'window':'Han'}
+                    {'window':'None'} #Supported windows: BlackmanHarris, Hamming, None
                     )
 
     cfar_cfg: dict = field(default_factory=lambda:
-                     {'dd_mode': 'CA', #Cfar mode in the doppler-domain (dd)
+                     {'dd_mode': 'CASO', #Cfar mode in the doppler-domain (dd)
                       'rd_mode': 'CA', #Cfar mode in the range-domain (rd)
                       'n_train_dd': 5, #Training samples dd
                       'n_train_rd': 5, #Training samples rd
@@ -56,7 +59,14 @@ class ProcessingSettings:
     dbscan_cfg: dict = field(default_factory=lambda:
                        {'dbscan_eps': 2,
                         'dbscan_min_samp': 2,
-                        'filter_stationary': False})
+                        'filter_stationary': True})
+
+    stft_cfg: dict = field(default_factory=lambda :
+                     {'hop': 1,
+                      'mfft': 256,
+                      'winLen': 8,
+                      'winStd': 5,
+                      'window': 'Gaussian'}) # Supported: Gaussian, Hanning, BlackmanHarris
 
 
 @dataclass
@@ -77,6 +87,18 @@ class ProcessingResults:
 
     worst_chirp_idx: int = None
     worst_rx_idx: int = None
+
+    # Post range-FFT slow time - un-windowed
+    postRfftSlowTime: np.ndarray = None
+
+    # STFT results, computed at a (rboi, dboi)
+    stft_dB: np.ndarray = None
+    stft_linear: np.ndarray = None
+    stft_time_axis: np.ndarray = None
+    stft_doppler_axis: np.ndarray = None
+    stft_rboi: int = None
+    stft_dboi: int = None
+
 
     # Rdm heatmap
     rdmHeatmapMtg: np.ndarray = None
@@ -103,4 +125,127 @@ class ProcessingResults:
     dbscan_centroids: np.ndarray = None
 
 
+@dataclass
+# Multiple CPI processing settings - abbrev. as 'mcpi_ps' in further code
+class multiCpiProcessingSettings:
+    # Tracker settings
+    dt: float
+    process_noise: list = field(default_factory=lambda: [0.5, 0.5])
+    meas_noise: list = field(default_factory=lambda: [1.0, 1.0])
+    dist_thresh: float = 10.0
+    max_misses: int = 0
+    min_hits_confirm: int = 3
 
+    # Extraction mode
+    extract_noise: bool = False
+
+
+#======================================================================================
+#=============================<<< Tracker logging types >>>============================
+#======================================================================================
+@dataclass
+# Snapshot of one track's state in a single frame. Captures both what the KF believed vs the measurement (if any)
+class TrackSnapshot:
+    frame_idx: int
+    track_id: int
+    was_updated: bool
+
+    # Raw measurement [range_bin, doppler_bin] from DBSCAN, or None on a miss
+    measurement: Optional[np.ndarray]
+    predicted_position: np.ndarray
+    kf_state: np.ndarray
+
+    # Track-level counters at this point in time
+    age: int
+    hits_total: int
+    consecutive_hits: int
+    misses_total: int
+    misses_consecutive: int
+    is_confirmed: bool
+
+
+
+@dataclass
+# Lifetime record of one track. Built up incrementally and finalized when the track is deleted (or when the file ends).
+class TrackHistory:
+    track_id: int
+    birth_frame: int
+    death_frame: Optional[int] = None
+
+    # First and last raw measurements
+    birth_measurement: Optional[np.ndarray] = None
+    last_measurement: Optional[np.ndarray] = None
+
+    # Per-frame snapshots over the track's life (in chronological order)
+    snapshots: List[TrackSnapshot] = field(default_factory=list)
+
+    # Summary stats - filled in at finalization
+    lifetime_frames: Optional[int] = None
+    peak_consecutive_hits: int = 0
+    total_hits: int = 0
+    total_misses: int = 0
+    ever_confirmed: bool = False
+    confirmed_at_frame: Optional[int] = None
+
+    # Called when the track disappears (deleted or run ends)
+    def finalize(self, death_frame: int):
+        self.death_frame = death_frame
+        self.lifetime_frames = death_frame - self.birth_frame + 1
+
+        if self.snapshots:
+            self.peak_consecutive_hits = max(s.consecutive_hits for s in self.snapshots)
+            self.total_hits = max(s.hits_total for s in self.snapshots)
+            self.total_misses = max(s.misses_total for s in self.snapshots)
+            self.ever_confirmed = any(s.is_confirmed for s in self.snapshots)
+            for s in self.snapshots:
+                if s.is_confirmed:
+                    self.confirmed_at_frame = s.frame_idx
+                    break
+
+    # Optional per-track feature data, populated by extract_stft_features()
+    features: Optional["TrackFeatures"] = None
+
+
+@dataclass
+# Top-level container for everything the tracker produced over a full file. Two views:
+# per_frame_snapshots[frame_idx] - list of TrackSnapshot for that frame
+# track_histories[track_id] - full lifetime TrackHistory for that track
+class TrackerResults:
+    per_frame_snapshots: Dict[int, List[TrackSnapshot]] = field(default_factory=dict)
+    track_histories: Dict[int, TrackHistory] = field(default_factory=dict)
+
+    # Per-frame measurement counts (input to the tracker), useful for diagnostics
+    measurements_per_frame: Dict[int, int] = field(default_factory=dict)
+
+    # Total number of frames processed
+    num_frames_processed: int = 0
+
+    def all_track_ids(self) -> List[int]:
+        return sorted(self.track_histories.keys())
+
+    def confirmed_track_ids(self) -> List[int]:
+        return sorted(tid for tid, h in self.track_histories.items() if h.ever_confirmed)
+
+
+
+
+@dataclass
+# Per-track classifier feature data. One TrackFeatures instance per TrackHistory.
+# Keep this flat - frame-aligned arrays indexed by position.
+class TrackFeatures:
+    track_id: int
+
+    # Frame-aligned arrays (length = number of frames where the track had a measurement)
+    frame_indices: np.ndarray = None    # (N_meas,) int
+    range_bins:    np.ndarray = None    # (N_meas,) int
+    doppler_bins:  np.ndarray = None    # (N_meas,) int
+
+    # Per-frame STFT stack
+    stft_dB:     np.ndarray = None      # (N_meas, mfft, n_stft_frames) float
+    stft_linear: np.ndarray = None      # (N_meas, mfft, n_stft_frames) float
+
+    # STFT axes - same for every frame, stored once
+    stft_time_axis:    np.ndarray = None    # (n_stft_frames,)
+    stft_doppler_axis: np.ndarray = None    # (mfft,)
+
+    stft_subband: int = 0
