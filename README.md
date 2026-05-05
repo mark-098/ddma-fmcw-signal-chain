@@ -7,6 +7,11 @@ The public demo code currently covers raw ADC loading, interference mitigation, 
 > This repository is under active development, so the documentation may not always fully reflect the current code status.
 
 
+## Open in Colab
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mark-098/ddma-fmcw-signal-chain/blob/main/notebooks/RepoDescription.ipynb)
+
+
 ## Signal Chain
 
 The full graphical overview is available in the Colab notebook:
