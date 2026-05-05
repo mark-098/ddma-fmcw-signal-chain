@@ -9,10 +9,9 @@ It assumes a single track per frame and supports stationary radars only.
 > This repository is under active development, so the documentation may not always fully reflect the current code status.
 
 ## Dataset
-
 A small example raw FMCW radar ADC dataset is available from the repository Releases page:
 
-[Download the raw DDMA MIMO FMCW radar ADC dataset] https://github.com/mark-098/ddma-fmcw-signal-chain/releases/tag/v1.0 
+[Download the raw DDMA MIMO FMCW radar ADC dataset](https://github.com/mark-098/ddma-fmcw-signal-chain/releases/tag/v1.0) 
 
 The dataset is split by radar configuration/profile into separate ZIP files. Each profile contains measurements for human (`HUM`), dog (`DOG`), and no-target/noise-only recordings (`NOS`).
 
