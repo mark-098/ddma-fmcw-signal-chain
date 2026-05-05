@@ -9,7 +9,7 @@ It assumes a single track per frame and supports stationary radars only.
 > This repository is under active development, so the documentation may not always fully reflect the current code status.
 
 ## Datasets
-Data acquiered with the DCA1000EVm and the AWR2944EVM may which are to be used within this demo may be found under: [LINK]
+Data acquiered with the DCA1000EVM and the AWR2944EVM may be found under: [LINK]
 
 
 ## Schematic overview 
